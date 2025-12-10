@@ -7,7 +7,7 @@ from flight_control import (
     connect_to_ardupilot, set_home, set_mode_guided, set_mode_auto,
     send_command_arm, send_command_disarm, send_command_takeoff, send_command_land
 )
-
+from mission_control import send_waypoints_to_drone
 
 
 # Источники используемых GUI библиотек
@@ -57,6 +57,7 @@ TARGET_SYSTEM  = 200    # ID дрона
 TARGET_COMPONENT = 1    # ID автопилота
 
 TAKEOFF_ALT = 10 # Взлетаем на относительную высоту в метрах
+
 
 # Глобальная переменная marker для позиции Home дрона
 drone_home_marker = None
@@ -206,6 +207,7 @@ map_widget.set_zoom(MAP_INIT_ZOOM)
 
 # Функция для добавления маркера на карту
 def add_marker_event_handler(position):
+    '''
     if len(position_list) == 0:
         position_list.append(position)
         position_list.append(position)
@@ -214,29 +216,31 @@ def add_marker_event_handler(position):
             position_list.insert(-1, position)
         else:
             position_list.append(position)
-
-    count = len(position_list) - 1
+    '''
+    position_list.append(position)
+    #count = len(position_list) - 1
+    count = len(position_list)
     map_widget.set_marker(position[0], position[1],
                    text=MARKER_TEXT_PREFIX + str(count), text_color=MARKER_TEXT_COLOR,
                    marker_color_circle= MARKER_ICON_COLOR_IN, marker_color_outside=MARKER_ICON_COLOR_OUT,
                    command=marker_click_event_handler)
-
-    map_widget.delete_all_path()
-    map_widget.set_path(position_list, color=PATH_COLOR, width=PATH_WIDTH)
+    if count > 1:
+        map_widget.delete_all_path()
+        map_widget.set_path(position_list, color=PATH_COLOR, width=PATH_WIDTH)
 
 
 def marker_click_event_handler(marker):
-    last_index = -2 if PATH_CYCLIC else -1
-
+    #last_index = -2 if PATH_CYCLIC else -1
+    last_index = -1
     if marker.position != position_list[last_index]: return
-
     map_widget.delete(marker)
     map_widget.delete_all_path()
 
-    if len(position_list) == 2:
-        position_list.clear()
-    else:
-        position_list.pop(last_index)
+    #if len(position_list) == 2:
+    #    position_list.clear()
+    #else:
+    position_list.pop(last_index)
+    if len(position_list) > 1:
         map_widget.set_path(position_list, color=PATH_COLOR, width=PATH_WIDTH)
 
 
@@ -349,8 +353,16 @@ def send_guided_advanced():
 btn_send_guided.configure(command=send_guided_advanced)
 
 def send_wp_advanced():
+    if len(position_list) == 0:
+        status_bar.set_status("Нет маршрутных точек для полета!", "error")
+        return
     if master:
         status_bar.set_status(f"Отправляем точки маршрута.")
+        result = send_waypoints_to_drone(master, position_list, TAKEOFF_ALT)
+        if result:
+            print("Маршрут загружен в Ardupilot! Теперь можно нажать AUTO!")
+        else:
+            print("Не удалось отправить маршрут!")
     else:
         status_bar.set_status("Нет подключения к Ardupilot!", "error")
 
