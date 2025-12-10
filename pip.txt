@@ -1,0 +1,7 @@
+# Для сборки зависимостей проекта в файл выполните команду в терминале PyCharm:
+
+pip freeze > requirements.txt
+
+# После клонирования проекта с GitHub выполните команду в терминале PyCharm:
+
+pip install -r requirements.txt
