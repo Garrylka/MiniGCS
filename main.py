@@ -2,8 +2,10 @@ import tkinter as tk
 import customtkinter as ctk
 from tkintermapview import TkinterMapView
 from tkinter import Menu
+import os
 import setup_gui as gui
 
+# Источники используемых библиотек
 #https://github.com/TomSchimansky/TkinterMapView
 #https://customtkinter.tomschimansky.com/
 #https://github.com/TomSchimansky/CustomTkinter
@@ -43,11 +45,19 @@ PATH_COLOR = 'red'
 PATH_WIDTH = 3
 
 
-# Храним позицию HOME дрона для отрисовки на карте
-#drone_home_position = HOME_POSITION_SPARTAK.copy()
+# Глобальная переменная marker для позиции Home дрона
+drone_home_marker = None
+
+# Глобальная переменная Список точек маршрута (lat, lon)
+position_list = []
+
 
 # Создание основного окна Tkinter
 window = ctk.CTk()
+
+# Путь к базе данных offline-тайлов карты (offline tiles)
+script_directory = os.path.dirname(os.path.abspath(__file__))
+database_path = os.path.join(script_directory, "offline_tiles.db")
 
 '''
 # Создание меню приводит к неправильному расположению окна (уходит под Панель задач).
@@ -84,8 +94,7 @@ frame_map.grid(row=0, column=1, padx=0, pady=0, sticky="nsew")
 
 
 # Создание виджета карты
-#map = tkintermapview.TkinterMapView(window, width=800, height=600, corner_radius=0)
-map_widget = TkinterMapView(frame_map, corner_radius=0)
+map_widget = TkinterMapView(frame_map, corner_radius=0, database_path=database_path)
 map_widget.grid(row=0, column=0, padx=(0, 0), pady=(0, 0), sticky="nsew")
 
 
@@ -120,19 +129,9 @@ map_widget.set_tile_server("https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z
 #map_widget.place(relx=0.5, rely=0.5, anchor=tk.CENTER) # Хз?
 map_widget.pack(fill="both", expand=True)
 
-
 # Установка начальной позиции карты
-#map.set_position(61.7829553, 34.3596839, marker=True) # Добавляет маркер на карту, не надо.
 map_widget.set_position(MAP_INIT_POSITION_LAT, MAP_INIT_POSITION_LON)
 map_widget.set_zoom(MAP_INIT_ZOOM)
-
-'''
-marker_3 = map.set_marker(61.7829553, 34.3596839, text="Tower", text_color="green", 
-    marker_color_circle="black", marker_color_outside="gray40", font=("Helvetica Bold", 24))
-'''
-
-# Список точек маршрута (lat, lon)
-position_list = []
 
 
 # Функция для добавления маркера на карту
