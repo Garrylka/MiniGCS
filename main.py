@@ -1,11 +1,16 @@
-import tkinter as tk
 import customtkinter as ctk
-from tkintermapview import TkinterMapView
-from tkinter import Menu
 import os
 import setup_gui as gui
+from status_bar import StatusBar
+from extended_mapview import ExtendedMapView
+from flight_control import (
+    connect_to_ardupilot, set_home, set_mode_guided, set_mode_auto,
+    send_command_arm, send_command_disarm, send_command_takeoff, send_command_land
+)
 
-# Источники используемых библиотек
+
+
+# Источники используемых GUI библиотек
 #https://github.com/TomSchimansky/TkinterMapView
 #https://customtkinter.tomschimansky.com/
 #https://github.com/TomSchimansky/CustomTkinter
@@ -19,6 +24,7 @@ WINDOW_TITLE = f'{APP_NAME} - {APP_VERSION}'
 WINDOW_W = 800
 WINDOW_H = 600
 WINDOW_MAXIMIZED = False
+FRAME_CTRL_WIDTH = 250
 
 # PTZ HOME:     61.7829553, 34.3596839, ALT: 70
 # PTZ SPARTAK:  61.7825445, 34.3673560, ALT: 60
@@ -44,12 +50,22 @@ PATH_CYCLIC = False
 PATH_COLOR = 'red'
 PATH_WIDTH = 3
 
+DEFAULT_CONN_STRING = 'tcp:127.0.0.1:14550'     # Если MP и код на одном компе
+REMOTE_CONN_STRING  = 'tcp:192.168.0.10:14550'  # IP компа с MP, настроен TCP IN 14550 одной строкой в MAVLink Mirror в MP
+
+TARGET_SYSTEM  = 200    # ID дрона
+TARGET_COMPONENT = 1    # ID автопилота
+
+TAKEOFF_ALT = 10 # Взлетаем на относительную высоту в метрах
 
 # Глобальная переменная marker для позиции Home дрона
 drone_home_marker = None
 
 # Глобальная переменная Список точек маршрута (lat, lon)
 position_list = []
+
+# Глобальная переменная для работы с MAVLink
+master = None
 
 
 # Создание основного окна Tkinter
@@ -82,31 +98,88 @@ frame_top.grid(row=0, column=0, pady=0, padx=0, sticky="nsew")
 frame_status = ctk.CTkFrame(master=window, height=30, corner_radius=0, fg_color=None)
 frame_status.grid(row=1, column=0, padx=0, pady=0, sticky="nsew")
 
-frame_top.grid_columnconfigure(0, weight=0)
-frame_top.grid_columnconfigure(1, weight=1)
-frame_top.grid_rowconfigure(0, weight=1)
-
-frame_ctrl = ctk.CTkFrame(master=frame_top, width=200, corner_radius=0, fg_color=None)
-frame_ctrl.grid(row=0, column=0, padx=0, pady=0, sticky="nsew")
+frame_ctrl = ctk.CTkFrame(master=frame_top, width=FRAME_CTRL_WIDTH, corner_radius=0, fg_color=None)
+frame_ctrl.pack(side="left", fill="y")  # Фиксированная ширина из width=250
+frame_ctrl.grid_columnconfigure(0, weight=1)  # Дочерние будут растягиваться по ширине
 
 frame_map = ctk.CTkFrame(master=frame_top, corner_radius=0)
-frame_map.grid(row=0, column=1, padx=0, pady=0, sticky="nsew")
-
-
-# Создание виджета карты
-map_widget = TkinterMapView(frame_map, corner_radius=0, database_path=database_path)
-map_widget.grid(row=0, column=0, padx=(0, 0), pady=(0, 0), sticky="nsew")
-
+frame_map.pack(side="right", fill="both", expand=True)
 
 # Создание статус-бара
-status_bar = ctk.CTkLabel(frame_status, text="", corner_radius=0)
-status_bar.grid(row=0, column=0, pady=0, padx=0, sticky="nsew")
-
-# Функция для обновления статус-бара
-def update_status(message):
-    status_bar.config(text=message)
+status_bar = StatusBar(frame_status, height=28)  # height=28 чтобы влезло в frame_status высотой 30
+status_bar.pack(padx=2, pady=2, fill='both')
+status_bar.set_status("Это строка состояния!", "info")
 
 
+# И используем grid для размещения дочерних элементов
+#zoom_label = ctk.CTkLabel(frame_ctrl, text="Зум: ", height=40, font=("Arial", 12))
+#zoom_label.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+
+conn_frame = ctk.CTkFrame(frame_ctrl, fg_color="transparent")
+conn_frame.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
+conn_frame.grid_columnconfigure(0, weight=1)
+
+conn_entry = ctk.CTkEntry(conn_frame, placeholder_text="Строка соединения...", font=("Arial", 10))
+conn_entry.grid(row=0, column=0, sticky="ew", padx=5)
+conn_button = ctk.CTkButton(conn_frame, text="🔌", width=40, fg_color=("gray70", "gray30"))
+conn_button.grid(row=0, column=1)
+conn_entry.delete(0, "end")
+conn_entry.insert(0, REMOTE_CONN_STRING)
+
+
+btn_send_home = ctk.CTkButton(frame_ctrl, text="SET HOME", height=40)
+btn_send_home.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+
+btn_send_wp = ctk.CTkButton(frame_ctrl, text="SEND WP", height=40)
+btn_send_wp.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
+
+btn_send_guided = ctk.CTkButton(frame_ctrl, text="GUIDED", height=40)
+btn_send_guided.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
+
+btn_send_arm = ctk.CTkButton(frame_ctrl, text="ARM", height=40)
+btn_send_arm.grid(row=4, column=0, padx=10, pady=5, sticky="ew")
+
+btn_send_takeoff = ctk.CTkButton(frame_ctrl, text="TAKEOFF", height=40)
+btn_send_takeoff.grid(row=5, column=0, padx=10, pady=5, sticky="ew")
+
+btn_send_land = ctk.CTkButton(frame_ctrl, text="LAND", height=40)
+btn_send_land.grid(row=6, column=0, padx=10, pady=5, sticky="ew")
+
+btn_send_disarm = ctk.CTkButton(frame_ctrl, text="DISARM", height=40)
+btn_send_disarm.grid(row=7, column=0, padx=10, pady=5, sticky="ew")
+
+btn_send_auto = ctk.CTkButton(frame_ctrl, text="AUTO", height=40)
+btn_send_auto.grid(row=8, column=0, padx=10, pady=5, sticky="ew")
+
+
+#switch = ctk.CTkSwitch(frame_ctrl, text="Слои карты", height=40)
+#switch.grid(row=3, column=0, padx=10, pady=5, sticky="w")
+
+# Зациклить полет
+#checkbox_grid = ctk.CTkCheckBox(frame_ctrl, text="Зациклить полет", height=30, corner_radius=5)
+#checkbox_grid.grid(row=4, column=0, padx=10, pady=5, sticky="w")
+
+spacer = ctk.CTkFrame(frame_ctrl, fg_color="transparent")
+spacer.grid(row=9, column=0, sticky="nsew")
+
+# Настраиваем веса строк
+frame_ctrl.grid_rowconfigure(9, weight=1)  # Заполнитель растягивается
+
+
+# MAP
+def debug_mouse_callback(lat, lon):
+    if lat is not None:
+        #print(f"Мышь над картой: {lat:.6f}, {lon:.6f}")
+        status_bar.set_coordinates(lat, lon)
+    else:
+        #print("Мышь вне карты")
+        pass
+
+# Создание виджета карты
+map_widget = ExtendedMapView(frame_map,
+                             zoom_callback=lambda z: status_bar.set_zoom(z),
+                             mouse_callback=debug_mouse_callback,
+                             corner_radius=0, database_path=database_path)
 
 '''
 # example tile sever:
@@ -124,9 +197,6 @@ self.map_widget.set_overlay_tile_server("http://tiles.openseamap.org/seamark//{z
 self.map_widget.set_overlay_tile_server("http://a.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png")  # railway infrastructure
 '''
 map_widget.set_tile_server("https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}&s=Ga", max_zoom=20)  # google satellite)
-
-#map_widget.place(x=0, y=0)
-#map_widget.place(relx=0.5, rely=0.5, anchor=tk.CENTER) # Хз?
 map_widget.pack(fill="both", expand=True)
 
 # Установка начальной позиции карты
@@ -220,6 +290,117 @@ gui.setup_window(window, WINDOW_TITLE, WINDOW_W, WINDOW_H, WINDOW_MAXIMIZED)
 
 # Отрисовка HOME дрона при инициализации программы
 drone_home_marker = draw_drone_home_position((MAP_INIT_POSITION_LAT, MAP_INIT_POSITION_LON))
+
+
+def get_connection_string():
+    """Получить строку подключения с проверкой"""
+    conn_text = conn_entry.get().strip()
+
+    if conn_text:  # Если не пустая
+        return conn_text
+    else:
+        # Значение по умолчанию
+        return DEFAULT_CONN_STRING
+
+
+def connect_mavlink_advanced():
+    global master
+    #current_icon = conn_button.cget("text")
+    #if current_icon == "🔌":
+    if master is None:
+        connection_string = get_connection_string()
+        status_bar.set_status(f"Подключаемся к Ardupilot по адресу: {connection_string} ...")
+        master = connect_to_ardupilot(connection_string)
+        if master is None:
+            status_bar.set_status("Ошибка подключения!", "error")
+        else:
+            status_bar.set_status(f"Подключились к системе {master.target_system}, компонент {master.target_component}", "success")
+            conn_button.configure(text="⚡", fg_color=("green", "darkgreen"))
+    else:
+        conn_button.configure(text="🔌", fg_color=("gray70", "gray30"))
+        status_bar.set_status("Отключились от Ardupilot!", "info")
+        master.close()
+        master = None
+
+conn_button.configure(command=connect_mavlink_advanced)
+
+
+def send_home_advanced():
+    if master:
+        status_bar.set_status(f"Устанавливаем новые координаты Home.")
+        home_position = HOME_POSITION_SPARTAK
+        result = set_home(master, **home_position)
+        if result:
+            status_bar.set_status("Новые координаты Home установились успешно!", "success")
+        else:
+            status_bar.set_status("Ошибка при установки Home", "error")
+    else:
+        status_bar.set_status("Нет подключения к Ardupilot!", "error")
+
+btn_send_home.configure(command=send_home_advanced)
+
+def send_guided_advanced():
+    if master:
+        status_bar.set_status(f"Устанавливаем режим GUIDED.")
+        set_mode_guided(master)
+    else:
+        status_bar.set_status("Нет подключения к Ardupilot!", "error")
+
+btn_send_guided.configure(command=send_guided_advanced)
+
+def send_wp_advanced():
+    if master:
+        status_bar.set_status(f"Отправляем точки маршрута.")
+    else:
+        status_bar.set_status("Нет подключения к Ardupilot!", "error")
+
+btn_send_wp.configure(command=send_wp_advanced)
+
+def send_arm_advanced():
+    if master:
+        status_bar.set_status(f"Отправляем команду ARM.")
+        send_command_arm(master)
+    else:
+        status_bar.set_status("Нет подключения к Ardupilot!", "error")
+
+btn_send_arm.configure(command=send_arm_advanced)
+
+def send_takeoff_advanced():
+    if master:
+        status_bar.set_status(f"Отправляем команду TAKEOFF.")
+        send_command_takeoff(master, TAKEOFF_ALT)
+    else:
+        status_bar.set_status("Нет подключения к Ardupilot!", "error")
+
+btn_send_takeoff.configure(command=send_takeoff_advanced)
+
+def send_land_advanced():
+    if master:
+        status_bar.set_status(f"Отправляем команду LAND.")
+        send_command_land(master)
+    else:
+        status_bar.set_status("Нет подключения к Ardupilot!", "error")
+
+btn_send_land.configure(command=send_land_advanced)
+
+def send_disarm_advanced():
+    if master:
+        status_bar.set_status(f"Отправляем команду DISARM.")
+        send_command_disarm(master)
+    else:
+        status_bar.set_status("Нет подключения к Ardupilot!", "error")
+
+btn_send_disarm.configure(command=send_disarm_advanced)
+
+def send_auto_advanced():
+    if master:
+        status_bar.set_status(f"Устанавливаем режим AUTO.")
+        set_mode_auto(master)
+    else:
+        status_bar.set_status("Нет подключения к Ardupilot!", "error")
+
+btn_send_auto.configure(command=send_auto_advanced)
+
 
 # Запуск главного цикла Tkinter
 window.mainloop()
